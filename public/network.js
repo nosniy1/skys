@@ -18,6 +18,8 @@ export class Network {
         if (msg.type === 'welcome') {
           this.id = msg.id;
           resolve(msg);
+        } else if (msg.type === 'banned' && this.id === null) {
+          reject(new Error('banned'));
         } else {
           this.onMessage(msg);
         }
