@@ -1,6 +1,6 @@
 # ✈️ Skys
 
-A little 3D airplane game. Fly through a city of skyscrapers and pop the balloons!
+A little 3D airplane game. Fly through a big city (downtown towers, parks, houses, factories) and pop the balloons!
 
 ## How to start the game
 

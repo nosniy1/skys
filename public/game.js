@@ -20,15 +20,16 @@ const SETTINGS = {
   bombGravity: 30,      // how fast bombs fall
   bombBlastSize: 35,    // how far away a bomb can pop balloons (and hurt you!)
   maxHeight: 400,       // the highest you can fly
-  cityBlocks: 12,       // how many blocks wide the city is
-  balloonCount: 25,     // how many balloons to pop
+  cityBlocks: 20,       // how many blocks wide the city is
+  balloonCount: 40,     // how many balloons to pop
   planeColor: 0xd32f2f, // your plane's color (red)
 };
 
 // =====================================================================
 // THE 3D WORLD: renderer, camera, lights
 // =====================================================================
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// logarithmicDepthBuffer stops flat things (like streets on grass) from flickering
+const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -36,7 +37,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.3, 6000);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.5, 6000);
 
 scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x5b6b4a, 1.4));
 // The sun. It follows the plane so there are always nice shadows near you.
@@ -208,9 +209,12 @@ function updateBombs(dt) {
 
     const p = bomb.mesh.position;
     const building = world.hitsBuilding(p, 0);
-    if (p.y <= 0 || building) {
+    const balloon = balloons.find((b) => b.group.position.distanceTo(p) < 6);
+    if (p.y <= 0 || building || balloon) {
       let surface = null;
-      if (!building) {
+      if (balloon) {
+        surface = null;                                // hit a balloon in the air!
+      } else if (!building) {
         p.y = 0;
         surface = 0;                                   // hit the ground
       } else if (p.y > building.height - 4) {
@@ -370,7 +374,8 @@ function updatePlayer(dt) {
   }
 
   // Too far away from the city?
-  if (Math.abs(player.pos.x) > 1500 || Math.abs(player.pos.z) > 1500) {
+  const edge = world.citySize / 2 + 700;
+  if (Math.abs(player.pos.x) > edge || Math.abs(player.pos.z) > edge) {
     showMessage('Turn back! 🏙️', 0.2);
   }
 
@@ -425,9 +430,32 @@ function updateCamera(dt) {
   }
 }
 
+// The sun's shadow picture moves with the plane. To stop the shadows from shimmering,
+// it only moves in tiny steps that match the pixels of the shadow picture.
+const sunDirection = SUN_OFFSET.clone().normalize();
+const sunRight = new THREE.Vector3().crossVectors(THREE.Object3D.DEFAULT_UP, sunDirection).normalize();
+const sunUp = new THREE.Vector3().crossVectors(sunDirection, sunRight);
+const shadowPixel = 700 / 2048;
+const snap = (n) => Math.round(n / shadowPixel) * shadowPixel;
+
 function updateSun() {
-  sun.target.position.copy(player.pos);
-  sun.position.copy(player.pos).add(SUN_OFFSET);
+  const p = player.pos;
+  sun.target.position.set(0, 0, 0)
+    .addScaledVector(sunRight, snap(p.dot(sunRight)))
+    .addScaledVector(sunUp, snap(p.dot(sunUp)))
+    .addScaledVector(sunDirection, p.dot(sunDirection));
+  sun.position.copy(sun.target.position).add(SUN_OFFSET);
+}
+
+// Factory chimneys puff out smoke
+let smokeTimer = 0;
+function updateChimneys(dt) {
+  smokeTimer -= dt;
+  if (smokeTimer > 0) return;
+  smokeTimer = 0.35;
+  for (const chimney of world.chimneys) {
+    if (chimney.distanceTo(camera.position) < 1200) effects.chimneySmoke(chimney);
+  }
 }
 
 function updateHud() {
@@ -470,6 +498,7 @@ function loop() {
     updateBombs(dt);
     updateCamera(dt);
     updateSun();
+    updateChimneys(dt);
     updateHud();
     sounds.update(player.speed, player.alive, nearBuilding);
 
@@ -486,4 +515,4 @@ function loop() {
 loop();
 
 // For testing: lets a test program look inside the game
-window.skys = { player, keys, camera, get score() { return score; } };
+window.skys = { player, keys, camera, balloons, get score() { return score; } };

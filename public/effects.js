@@ -132,7 +132,7 @@ export class Effects {
     if (surfaceY !== null) {
       const scorch = new THREE.Mesh(scorchShape,
         new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.75, depthWrite: false }));
-      scorch.position.set(position.x, surfaceY + 0.15 + Math.random() * 0.05, position.z);
+      scorch.position.set(position.x, surfaceY + 0.55 + Math.random() * 0.05, position.z);
       scorch.scale.setScalar(s * (1 + Math.random() * 0.4));
       this.scene.add(scorch);
       this.scorches.push(scorch);
@@ -147,6 +147,19 @@ export class Effects {
     this.light.position.copy(position);
     this.light.position.y += 8;
     this.lightPower = 200000 * s;
+  }
+
+  // A puff of smoke from a factory chimney
+  chimneySmoke(position) {
+    const material = new THREE.MeshLambertMaterial({ color: 0xbdbdbd, transparent: true, opacity: 0.6, depthWrite: false });
+    const puff = new THREE.Mesh(smokeShape, material);
+    puff.position.copy(position);
+    const drift = new THREE.Vector3(3 + Math.random() * 2, 4 + Math.random() * 2, Math.random() - 0.5);
+    this.add(puff, 6, (t, dt, m) => {
+      m.position.addScaledVector(drift, dt);
+      m.scale.setScalar(2 + 8 * t);
+      m.material.opacity = 0.6 * (1 - t);
+    });
   }
 
   // Tiny sparks when a bullet hits a wall

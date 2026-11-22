@@ -12,8 +12,11 @@
 
     #hud { position: fixed; top: 16px; left: 20px; color: white; font-size: 22px;
            font-weight: bold; line-height: 1.5; text-shadow: 0 2px 4px #000; }
-    #help { position: fixed; bottom: 12px; left: 0; right: 0; text-align: center;
-            color: white; opacity: 0.85; font-size: 15px; text-shadow: 0 1px 3px #000; }
+    #controls { position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+                background: rgba(0, 20, 50, 0.45); color: white; border-radius: 14px;
+                padding: 12px 16px; font-size: 15px; line-height: 2.2; pointer-events: none; }
+    #controls b { display: block; text-align: center; font-size: 16px; margin-bottom: 2px; }
+    #controls kbd { display: inline-block; min-width: 46px; text-align: center; margin-right: 8px; }
     #message { position: fixed; top: 38%; width: 100%; text-align: center; font-size: 72px;
                color: white; font-weight: 900; text-shadow: 0 4px 12px #000; pointer-events: none; }
     #crosshair { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -47,8 +50,18 @@
   <div id="crosshair" hidden>+</div>
   <div id="message"></div>
   <div id="flash"></div>
-  <div id="help">
-    <kbd>Space</kbd> shoot &nbsp; <kbd>B</kbd> bomb &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>M</kbd> music &nbsp; <kbd>F</kbd> full screen
+  <div id="controls">
+    <b>🎮 Controls</b>
+    <kbd>W</kbd>climb up<br>
+    <kbd>S</kbd>dive down<br>
+    <kbd>A</kbd>turn left<br>
+    <kbd>D</kbd>turn right<br>
+    <kbd>Shift</kbd>go faster<br>
+    <kbd>Space</kbd>shoot<br>
+    <kbd>B</kbd>drop a bomb<br>
+    <kbd>C</kbd>change camera<br>
+    <kbd>M</kbd>music on/off<br>
+    <kbd>F</kbd>full screen
   </div>
 
   <div id="start">
