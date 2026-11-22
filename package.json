@@ -1,0 +1,12 @@
+{
+  "name": "skys",
+  "version": "1.0.0",
+  "description": "A little 3D airplane game in a city of skyscrapers",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  }
+}
