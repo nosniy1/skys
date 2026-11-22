@@ -21,13 +21,17 @@ To stop the game server, go back to the Terminal and press **Ctrl + C**.
 | D         | Turn right          |
 | Shift     | Go faster (boost!)  |
 | Space     | Shoot               |
+| B         | Drop a bomb 💣      |
 | C         | Switch camera       |
 | M         | Music on / off      |
 | F         | Full screen         |
 
 ## The files
 
-- `public/game.js`: the game itself (the city, the plane, flying, shooting)
+- `public/game.js`: the game itself (flying, shooting, bombs, balloons, camera)
+- `public/world.js`: the sky, city, buildings, parks, mountains and clouds
+- `public/plane.js`: how the airplane and the bombs are built
+- `public/effects.js`: explosions, fire, smoke and flying pieces
 - `public/sounds.js`: all the sounds, made with code
 - `public/index.html`: the web page that holds the game
 - `server.js`: a tiny web server that sends the game to the browser

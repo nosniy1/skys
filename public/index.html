@@ -7,6 +7,8 @@
     html, body { margin: 0; height: 100%; overflow: hidden; background: #000;
                  font-family: -apple-system, Helvetica, Arial, sans-serif; user-select: none; }
     canvas { display: block; }
+    /* "hidden" must always win, even over display: flex (this was the menu bug!) */
+    [hidden] { display: none !important; }
 
     #hud { position: fixed; top: 16px; left: 20px; color: white; font-size: 22px;
            font-weight: bold; line-height: 1.5; text-shadow: 0 2px 4px #000; }
@@ -32,7 +34,12 @@
 
   <!-- This tells the browser where to find the "three" 3D library -->
   <script type="importmap">
-    { "imports": { "three": "/three/build/three.module.js" } }
+    {
+      "imports": {
+        "three": "/three/build/three.module.js",
+        "three/addons/": "/three/examples/jsm/"
+      }
+    }
   </script>
 </head>
 <body>
@@ -41,7 +48,7 @@
   <div id="message"></div>
   <div id="flash"></div>
   <div id="help">
-    <kbd>C</kbd> camera &nbsp; <kbd>M</kbd> music &nbsp; <kbd>F</kbd> full screen
+    <kbd>Space</kbd> shoot &nbsp; <kbd>B</kbd> bomb &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>M</kbd> music &nbsp; <kbd>F</kbd> full screen
   </div>
 
   <div id="start">
@@ -50,7 +57,8 @@
     <div class="keys">
       <kbd>W</kbd> climb up &nbsp; <kbd>S</kbd> dive down<br>
       <kbd>A</kbd> turn left &nbsp; <kbd>D</kbd> turn right<br>
-      <kbd>Shift</kbd> go faster &nbsp; <kbd>Space</kbd> shoot<br>
+      <kbd>Shift</kbd> go faster<br>
+      <kbd>Space</kbd> shoot &nbsp; <kbd>B</kbd> drop a bomb 💣<br>
       Pop the balloons! Don't hit the buildings!
     </div>
   </div>
