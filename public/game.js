@@ -1,12 +1,14 @@
 // ✈️ SKYS — the main game file
 import * as THREE from 'three';
 import { Sounds } from './sounds.js';
-import { createWorld } from './world.js';
-import { makePlane, makeBomb } from './plane.js';
+import { createWorld, random } from './world.js';
+import { makePlane, makeBomb, makeNameTag } from './plane.js';
 import { Effects } from './effects.js';
+import { Network } from './network.js';
 
 // =====================================================================
 // SETTINGS — try changing these numbers to change how the game feels!
+// (Health and points are in server.js, because the server is the referee.)
 // =====================================================================
 const SETTINGS = {
   normalSpeed: 40,      // how fast the plane flies normally
@@ -18,12 +20,13 @@ const SETTINGS = {
   bulletSpeed: 300,     // how fast bullets fly
   bombDelay: 0.4,       // seconds between each bomb
   bombGravity: 30,      // how fast bombs fall
-  bombBlastSize: 35,    // how far away a bomb can pop balloons (and hurt you!)
+  bombBlastSize: 35,    // how far away a bomb can pop balloons and hurt planes
   maxHeight: 400,       // the highest you can fly
   cityBlocks: 20,       // how many blocks wide the city is
   balloonCount: 40,     // how many balloons to pop
-  planeColor: 0xd32f2f, // your plane's color (red)
 };
+
+const PLANE_COLORS = [0xd32f2f, 0x1e88e5, 0x43a047, 0xfdd835, 0x8e24aa, 0xfb8c00, 0xec407a, 0x263238];
 
 // =====================================================================
 // THE 3D WORLD: renderer, camera, lights
@@ -56,17 +59,29 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-const world = createWorld(scene, renderer, SETTINGS);
+// =====================================================================
+// CONNECT TO THE SERVER (it tells us the city "seed" so everybody has the same city)
+// =====================================================================
+const statusText = document.getElementById('status');
+const network = new Network();
+let welcome;
+try {
+  welcome = await network.connect();
+} catch {
+  statusText.textContent = "😢 Can't connect to the server. Is it running? (npm start)";
+  throw new Error('No server');
+}
+
+const world = createWorld(scene, renderer, SETTINGS, welcome.seed);
 const effects = new Effects(scene);
 const sounds = new Sounds();
+const MAX_HEALTH = welcome.maxHealth;
 
 // =====================================================================
-// THE AIRPLANE
+// MY AIRPLANE
 // =====================================================================
-const planeMesh = makePlane(SETTINGS.planeColor);
+const planeMesh = makePlane(PLANE_COLORS[0]);
 scene.add(planeMesh);
-
-const START = new THREE.Vector3(0, 80, world.citySize / 2 + 150);
 
 const player = {
   pos: new THREE.Vector3(),
@@ -82,7 +97,8 @@ const player = {
 };
 
 function resetPlayer() {
-  player.pos.copy(START);
+  // Start outside the city, at a random spot so two players don't start in the same place
+  player.pos.set((Math.random() - 0.5) * 300, 80, world.citySize / 2 + 150);
   player.yaw = 0;
   player.pitch = 0;
   player.roll = 0;
@@ -93,7 +109,125 @@ function resetPlayer() {
 resetPlayer();
 
 // =====================================================================
-// BALLOONS to shoot at
+// THE OTHER PLAYERS
+// =====================================================================
+const others = new Map();   // id -> the other player's plane, name tag, and where they are
+let playerList = [];        // everybody, with names, colors, scores and health (from the server)
+let me = null;              // my own entry in playerList
+
+function addOther(info) {
+  const mesh = makePlane(info.color);
+  mesh.visible = false;
+  scene.add(mesh);
+  const tag = makeNameTag();
+  tag.visible = false;
+  scene.add(tag);
+  const other = {
+    info, mesh, tag,
+    target: { pos: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, speed: 0 },
+    receivedAt: 0,
+    alive: false,
+    hasState: false,
+  };
+  others.set(info.id, other);
+  if (started) showMessage(`👋 ${info.name} joined!`, 2.5);
+  return other;
+}
+
+function removeOther(id) {
+  const other = others.get(id);
+  if (!other) return;
+  scene.remove(other.mesh, other.tag);
+  others.delete(id);
+  if (started) showMessage(`👋 ${other.info.name} left`, 2.5);
+}
+
+function updatePlayerList(list) {
+  playerList = list;
+  const oldHealth = me ? me.health : null;
+  me = list.find((p) => p.id === network.id) || null;
+
+  for (const info of list) {
+    if (info.id === network.id) continue;
+    const other = others.get(info.id) || addOther(info);
+    other.info = info;
+    other.tag.userData.draw(info.name, info.color, info.health, MAX_HEALTH);
+  }
+  for (const id of [...others.keys()]) {
+    if (!list.some((p) => p.id === id)) removeOther(id);
+  }
+
+  // Did I just get hit?
+  if (me && oldHealth !== null && me.health < oldHealth && me.health > 0) {
+    flashScreen(0.35, '#ff0000');
+    sounds.hit();
+  }
+  updateScoreboard();
+}
+
+const ahead = new THREE.Vector3();
+const guess = new THREE.Vector3();
+const turnTo = (from, to, amount) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * amount;
+
+// We only hear from the others 20 times per second, so in between we guess
+// where they are by moving them forward at their speed. Then we glide there smoothly.
+function updateOthers(dt) {
+  const now = performance.now() / 1000;
+  for (const other of others.values()) {
+    other.mesh.visible = other.tag.visible = other.alive && other.hasState;
+    if (!other.mesh.visible) continue;
+    const t = other.target;
+    ahead.set(0, 0, -1).applyEuler(new THREE.Euler(t.pitch, t.yaw, 0, 'YXZ'));
+    guess.copy(t.pos).addScaledVector(ahead, t.speed * Math.min(now - other.receivedAt, 0.3));
+    const smooth = 1 - Math.exp(-dt * 15);
+    other.mesh.position.lerp(guess, smooth);
+    const r = other.mesh.rotation;
+    r.set(turnTo(r.x, t.pitch, smooth), turnTo(r.y, t.yaw, smooth), turnTo(r.z, t.roll, smooth));
+    other.mesh.userData.propeller.rotation.z += dt * 40;
+    other.tag.position.copy(other.mesh.position);
+    other.tag.position.y += 5;
+  }
+}
+
+function onOtherState(msg) {
+  const other = others.get(msg.id);
+  if (!other) return;
+  const t = other.target;
+  t.pos.fromArray(msg.p);
+  t.yaw = msg.yaw;
+  t.pitch = msg.pitch;
+  t.roll = msg.roll;
+  t.speed = msg.speed;
+  other.receivedAt = performance.now() / 1000;
+  if (msg.alive && (!other.alive || !other.hasState)) {
+    // They just appeared (or came back after crashing): jump straight there
+    other.mesh.position.copy(t.pos);
+    other.mesh.rotation.set(t.pitch, t.yaw, t.roll);
+  }
+  if (other.alive && !msg.alive && other.hasState) {
+    bigBang(other.mesh.position.clone(), 0.6, other.mesh.position.y < 3 ? 0 : null, false);
+  }
+  other.alive = msg.alive;
+  other.hasState = true;
+}
+
+// Tell everybody where my plane is, 20 times per second
+let sendTimer = 0;
+const round = (n) => Math.round(n * 100) / 100;
+function sendMyState(dt) {
+  sendTimer -= dt;
+  if (sendTimer > 0) return;
+  sendTimer = 0.05;
+  network.send({
+    type: 'state',
+    p: player.pos.toArray().map(round),
+    yaw: round(player.yaw), pitch: round(player.pitch), roll: round(player.roll),
+    speed: round(player.speed), alive: player.alive,
+  });
+}
+
+// =====================================================================
+// BALLOONS to shoot at (the same for everybody: first one to pop it gets the point!)
 // =====================================================================
 const balloons = [];
 const balloonColors = [0xff4081, 0xffeb3b, 0x00e5ff, 0x76ff03, 0xff9100, 0xd500f9];
@@ -101,18 +235,23 @@ const balloonShape = new THREE.SphereGeometry(4, 16, 12);
 const stringShape = new THREE.CylinderGeometry(0.05, 0.05, 6);
 const stringMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
-function placeBalloon(balloon) {
+// Find a free spot in the sky for a balloon (not inside a building)
+function balloonSpot(randomNumber) {
   const spread = world.citySize / 2;
+  const spot = new THREE.Vector3();
   do {
-    balloon.baseY = 30 + Math.random() * 150;
-    balloon.group.position.set(
-      (Math.random() * 2 - 1) * spread,
-      balloon.baseY,
-      (Math.random() * 2 - 1) * spread
-    );
-  } while (world.hitsBuilding(balloon.group.position, 8));
-  balloon.color = balloonColors[Math.floor(Math.random() * balloonColors.length)];
-  balloon.sphere.material.color.setHex(balloon.color);
+    spot.set((randomNumber() * 2 - 1) * spread, 30 + randomNumber() * 150, (randomNumber() * 2 - 1) * spread);
+  } while (world.hitsBuilding(spot, 8));
+  const color = balloonColors[Math.floor(randomNumber() * balloonColors.length)];
+  return { x: round(spot.x), y: round(spot.y), z: round(spot.z), color };
+}
+
+function moveBalloon(balloon, spot) {
+  balloon.baseY = spot.y;
+  balloon.group.position.set(spot.x, spot.y, spot.z);
+  balloon.color = spot.color;
+  balloon.sphere.material.color.setHex(spot.color);
+  balloon.group.visible = true;
 }
 
 for (let i = 0; i < SETTINGS.balloonCount; i++) {
@@ -123,18 +262,33 @@ for (let i = 0; i < SETTINGS.balloonCount; i++) {
   string.position.y = -7;
   group.add(sphere, string);
   scene.add(group);
-  const balloon = { group, sphere, baseY: 0, wobble: Math.random() * 10, color: 0 };
-  placeBalloon(balloon);
+  const balloon = { id: i, v: 0, group, sphere, baseY: 0, wobble: Math.random() * 10, color: 0 };
+  moveBalloon(balloon, balloonSpot(random)); // "random" with the seed: same spots for everybody
   balloons.push(balloon);
 }
-
-let score = 0;
+// Balloons that were already popped and moved before I joined
+for (const [id, spot] of Object.entries(welcome.balloons)) {
+  balloons[id].v = spot.v;
+  moveBalloon(balloons[id], spot);
+}
 
 function popBalloon(balloon) {
+  if (!balloon.group.visible) return;
   effects.burst(balloon.group.position, balloon.color, 15, 25, 0.8, true);
   sounds.pop();
-  score++;
-  placeBalloon(balloon);
+  balloon.group.visible = false;   // hide it until the server says where the new one goes
+  network.send({ type: 'pop', id: balloon.id, v: balloon.v, ...balloonSpot(Math.random) });
+}
+
+// The server says a balloon was popped and moved
+function onBalloonMoved(msg) {
+  const balloon = balloons[msg.id];
+  if (balloon.group.visible) {   // somebody else popped it
+    effects.burst(balloon.group.position, balloon.color, 15, 25, 0.8, true);
+    sounds.pop();
+  }
+  balloon.v = msg.v;
+  moveBalloon(balloon, msg);
 }
 
 // =====================================================================
@@ -145,34 +299,63 @@ const bulletShape = new THREE.BoxGeometry(0.15, 0.15, 3);
 const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffee58 });
 let gunSide = 1;
 
-function shoot(forward) {
+function addBullet(position, velocity, mine) {
   const mesh = new THREE.Mesh(bulletShape, bulletMaterial);
-  // Guns on the wings: left, right, left, right...
-  mesh.position.set(gunSide * 2.2, -0.3, -1.5).applyMatrix4(planeMesh.matrixWorld);
-  mesh.quaternion.copy(planeMesh.quaternion);
-  gunSide = -gunSide;
+  mesh.position.copy(position);
+  mesh.lookAt(position.clone().add(velocity));
   scene.add(mesh);
-  const velocity = forward.clone().multiplyScalar(SETTINGS.bulletSpeed + player.speed);
-  bullets.push({ mesh, velocity, life: 2 });
-  sounds.shoot();
+  bullets.push({ mesh, velocity, life: 2, mine });
 }
 
+function shoot(forward) {
+  // Guns on the wings: left, right, left, right...
+  const position = new THREE.Vector3(gunSide * 2.2, -0.3, -1.5).applyMatrix4(planeMesh.matrixWorld);
+  gunSide = -gunSide;
+  const velocity = forward.clone().multiplyScalar(SETTINGS.bulletSpeed + player.speed);
+  addBullet(position, velocity, true);
+  sounds.shoot();
+  network.send({ type: 'shoot', p: position.toArray().map(round), v: velocity.toArray().map(round) });
+}
+
+// Bullets move a lot in one frame, so we check the whole line they moved along
+const line = new THREE.Line3();
+const closest = new THREE.Vector3();
+function lineHits(from, to, center, radius) {
+  line.set(from, to);
+  line.closestPointToPoint(center, true, closest);
+  return closest.distanceTo(center) < radius;
+}
+
+const before = new THREE.Vector3();
 function updateBullets(dt) {
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
-    b.mesh.position.addScaledVector(b.velocity, dt);
-    b.life -= dt;
     const p = b.mesh.position;
+    before.copy(p);
+    p.addScaledVector(b.velocity, dt);
+    b.life -= dt;
 
     let gone = b.life <= 0;
     if (p.y < 0 || world.hitsBuilding(p, 0)) {
       effects.sparks(p);
       gone = true;
     }
-    for (const balloon of balloons) {
-      if (!gone && p.distanceTo(balloon.group.position) < 5) {
-        popBalloon(balloon);
-        gone = true;
+    // Only MY bullets check what they hit. The other player's computer checks theirs.
+    if (b.mine && !gone) {
+      for (const balloon of balloons) {
+        if (balloon.group.visible && lineHits(before, p, balloon.group.position, 5)) {
+          popBalloon(balloon);
+          gone = true;
+          break;
+        }
+      }
+      for (const [id, other] of others) {
+        if (!gone && other.alive && other.hasState && lineHits(before, p, other.mesh.position, 4.5)) {
+          network.send({ type: 'hit', target: id, damage: 1 });
+          effects.sparks(p);
+          sounds.hit(0.6);
+          gone = true;
+        }
       }
     }
     if (gone) {
@@ -187,15 +370,22 @@ function updateBullets(dt) {
 // =====================================================================
 const bombs = [];
 const bombModel = makeBomb();
+const noWhistle = { stop() {} };
+
+function addBomb(position, velocity, mine) {
+  const mesh = bombModel.clone();
+  mesh.position.copy(position);
+  scene.add(mesh);
+  bombs.push({ mesh, velocity, mine, whistle: mine ? sounds.bombDrop() : noWhistle });
+}
 
 function dropBomb(forward) {
-  const mesh = bombModel.clone();
-  mesh.position.set(0, -1.2, -0.5).applyMatrix4(planeMesh.matrixWorld);
-  scene.add(mesh);
+  const position = new THREE.Vector3(0, -1.2, -0.5).applyMatrix4(planeMesh.matrixWorld);
   // The bomb starts with the plane's speed, then gravity pulls it down
   const velocity = forward.clone().multiplyScalar(player.speed * 0.9);
   velocity.y -= 4;
-  bombs.push({ mesh, velocity, whistle: sounds.bombDrop() });
+  addBomb(position, velocity, true);
+  network.send({ type: 'bomb', p: position.toArray().map(round), v: velocity.toArray().map(round) });
 }
 
 const aim = new THREE.Vector3();
@@ -209,30 +399,30 @@ function updateBombs(dt) {
 
     const p = bomb.mesh.position;
     const building = world.hitsBuilding(p, 0);
-    const balloon = balloons.find((b) => b.group.position.distanceTo(p) < 6);
-    if (p.y <= 0 || building || balloon) {
-      let surface = null;
-      if (balloon) {
-        surface = null;                                // hit a balloon in the air!
-      } else if (!building) {
+    const hitBalloon = balloons.some((b) => b.group.visible && b.group.position.distanceTo(p) < 6);
+    const hitPlane = [...others.values()].some((o) => o.alive && o.hasState && o.mesh.position.distanceTo(p) < 5);
+    if (p.y <= 0 || building || hitBalloon || hitPlane) {
+      let surface = null;                              // exploded in the air
+      if (!building && !hitBalloon && !hitPlane) {
         p.y = 0;
         surface = 0;                                   // hit the ground
-      } else if (p.y > building.height - 4) {
+      } else if (building && p.y > building.height - 4) {
         p.y = building.height;
         surface = building.height;                     // hit a roof
       }
       bomb.whistle.stop();
-      bigBang(p.clone(), 1, surface);
+      bigBang(p.clone(), 1, surface, bomb.mine);
       scene.remove(bomb.mesh);
       bombs.splice(i, 1);
     }
   }
 }
 
-// A big explosion: fire, smoke, sound, shaking, and it pops balloons nearby
-function bigBang(position, size, surface) {
+// A big explosion: fire, smoke, sound and shaking. If it's MY bomb, it also
+// pops balloons and hurts other planes nearby.
+function bigBang(position, size, surface, mine) {
   effects.explosion(position, size, surface);
-  if (size >= 1) {           // the bomb camera keeps watching the explosion for a moment
+  if (mine && size >= 1) {   // the bomb camera keeps watching the explosion for a moment
     lastBlast.copy(position);
     blastTimer = 2;
   }
@@ -241,12 +431,53 @@ function bigBang(position, size, surface) {
   shake = Math.max(shake, Math.max(0, 1 - distance / 400) * 4 * size);
   if (distance < 250) flashScreen(0.6 * (1 - distance / 250), '#ffcc66');
 
-  for (const balloon of balloons) {
-    if (balloon.group.position.distanceTo(position) < SETTINGS.bombBlastSize) popBalloon(balloon);
+  if (mine && size >= 1) {
+    for (const balloon of balloons) {
+      if (balloon.group.position.distanceTo(position) < SETTINGS.bombBlastSize) popBalloon(balloon);
+    }
+    for (const [id, other] of others) {
+      if (!other.alive || !other.hasState) continue;
+      const d = other.mesh.position.distanceTo(position);
+      const damage = d < 15 ? 10 : d < SETTINGS.bombBlastSize ? 4 : 0;
+      if (damage > 0) network.send({ type: 'hit', target: id, damage });
+    }
+    // Careful! If your own bomb explodes too close, you crash too.
+    if (player.alive && player.pos.distanceTo(position) < 15) crash();
   }
-  // Careful! If your own bomb explodes too close, you crash too.
-  if (player.alive && size >= 1 && player.pos.distanceTo(position) < 15) crash();
 }
+
+// =====================================================================
+// MESSAGES FROM THE SERVER
+// =====================================================================
+const nameOf = (id) => (playerList.find((p) => p.id === id) || { name: 'Someone' }).name;
+
+network.onMessage = (msg) => {
+  switch (msg.type) {
+    case 'players': updatePlayerList(msg.players); break;
+    case 'state': onOtherState(msg); break;
+    case 'left': removeOther(msg.id); break;
+    case 'balloon': onBalloonMoved(msg); break;
+    case 'shoot': {
+      const position = new THREE.Vector3().fromArray(msg.p);
+      addBullet(position, new THREE.Vector3().fromArray(msg.v), false);
+      sounds.shoot(0.6 * Math.max(0, 1 - camera.position.distanceTo(position) / 600));
+      break;
+    }
+    case 'bomb':
+      addBomb(new THREE.Vector3().fromArray(msg.p), new THREE.Vector3().fromArray(msg.v), false);
+      break;
+    case 'killed':
+      if (msg.victim === network.id) {
+        crash();
+        showMessage(`💥 ${nameOf(msg.killer)} shot you down!`, 2.5);
+      } else if (msg.killer === network.id) {
+        showMessage(`🎯 You shot down ${nameOf(msg.victim)}! +5`, 2.5);
+      }
+      break;
+  }
+};
+
+network.onClose = () => showMessage('😢 Lost connection to the server. Reload the page!', 1e9);
 
 // =====================================================================
 // KEYBOARD
@@ -256,13 +487,14 @@ let cameraMode = 'behind';
 let started = false;
 
 addEventListener('keydown', (e) => {
+  if (!started) return;        // while typing your name, keys don't fly the plane
   keys[e.code] = true;
   if (e.code === 'Space') e.preventDefault();
-  if (!started || e.repeat) return;
+  if (e.repeat) return;
   if (e.code === 'KeyC') {
     cameraMode = cameraMode === 'behind' ? 'cockpit' : 'behind';
-    for (const part of planeMesh.userData.hideInCockpit) part.visible = cameraMode !== 'cockpit';
     document.getElementById('crosshair').hidden = cameraMode !== 'cockpit';
+    for (const part of planeMesh.userData.hideInCockpit) part.visible = cameraMode !== 'cockpit';
   }
   if (e.code === 'KeyM') sounds.toggleMusic();
   if (e.code === 'KeyF') toggleFullscreen();
@@ -276,9 +508,11 @@ function toggleFullscreen() {
 }
 
 // =====================================================================
-// SCREEN MESSAGES
+// SCREEN MESSAGES, SCORES AND HEALTH
 // =====================================================================
-const hud = document.getElementById('hud');
+const hudText = document.getElementById('hudtext');
+const healthFill = document.querySelector('#healthbar div');
+const scoreboard = document.getElementById('scoreboard');
 const message = document.getElementById('message');
 const flash = document.getElementById('flash');
 let messageTimer = 0;
@@ -298,14 +532,35 @@ function flashScreen(strength, color) {
   });
 }
 
+const hex = (color) => '#' + color.toString(16).padStart(6, '0');
+const safe = (text) => text.replace(/[<>&"]/g, '');
+
+function updateScoreboard() {
+  scoreboard.hidden = !started || playerList.length === 0;
+  scoreboard.innerHTML = [...playerList]
+    .sort((a, b) => b.score - a.score)
+    .map((p) => `<span class="${p.id === network.id ? 'me' : ''}"><span style="color:${hex(p.color)}">●</span> ${safe(p.name)}: ${p.score}</span>`)
+    .join('');
+}
+
+function updateHud() {
+  hudText.innerHTML =
+    `💨 Speed: ${Math.round(player.speed * 3)} km/h<br>` +
+    `⬆️ Height: ${Math.round(player.pos.y)} m`;
+  const health = me ? me.health / MAX_HEALTH : 1;
+  healthFill.style.width = `${health * 100}%`;
+  healthFill.style.background = health > 0.5 ? '#4caf50' : health > 0.2 ? '#ff9800' : '#f44336';
+}
+
 // =====================================================================
 // CRASH!
 // =====================================================================
 function crash() {
+  if (!player.alive) return;
   player.alive = false;
   player.respawnTimer = 2.5;
   planeMesh.visible = false;
-  bigBang(player.pos.clone(), 0.6, player.pos.y < 3 ? 0 : null);
+  bigBang(player.pos.clone(), 0.6, player.pos.y < 3 ? 0 : null, false);
   flashScreen(0.8, '#ff3300');
   showMessage('💥 BOOM! 💥', 2);
 }
@@ -403,10 +658,11 @@ function updateCamera(dt) {
     camera.position.set(0, 1.15, 0.1).applyMatrix4(planeMesh.matrixWorld);
     camera.quaternion.copy(planeMesh.quaternion);
   } else {
-    // BOMB CAMERA: while a bomb falls (or just exploded), go up high and look down at it
+    // BOMB CAMERA: while my bomb falls (or just exploded), go up high and look down at it
     blastTimer -= dt;
     let watching = null;
-    if (bombs.length > 0) watching = bombs[bombs.length - 1].mesh.position;
+    const myBomb = bombs.findLast((b) => b.mine);
+    if (myBomb) watching = myBomb.mesh.position;
     else if (blastTimer > 0) watching = lastBlast;
 
     // Otherwise, float behind and a bit above the plane
@@ -458,22 +714,56 @@ function updateChimneys(dt) {
   }
 }
 
-function updateHud() {
-  hud.innerHTML =
-    `🎈 Score: ${score}<br>` +
-    `💨 Speed: ${Math.round(player.speed * 3)} km/h<br>` +
-    `⬆️ Height: ${Math.round(player.pos.y)} m`;
-}
+// =====================================================================
+// START SCREEN: type your name, pick a color, and fly!
+// =====================================================================
+const nameInput = document.getElementById('name');
+const colorButtons = document.getElementById('colors');
+const flyButton = document.getElementById('fly');
+let myColor = PLANE_COLORS[0];
 
-// =====================================================================
-// START when you click
-// =====================================================================
-document.getElementById('start').addEventListener('click', () => {
+// Remember the name and color for next time
+try {
+  nameInput.value = localStorage.getItem('skys-name') || '';
+  myColor = Number(localStorage.getItem('skys-color')) || myColor;
+} catch {}
+
+for (const color of PLANE_COLORS) {
+  const button = document.createElement('button');
+  button.style.background = hex(color);
+  button.classList.toggle('picked', color === myColor);
+  button.addEventListener('click', () => {
+    myColor = color;
+    for (const b of colorButtons.children) b.classList.remove('picked');
+    button.classList.add('picked');
+    planeMesh.userData.paint.color.setHex(color);
+  });
+  colorButtons.append(button);
+}
+planeMesh.userData.paint.color.setHex(myColor);
+
+function startGame() {
+  if (started) return;
+  const name = nameInput.value.trim() || 'Pilot';
+  try {
+    localStorage.setItem('skys-name', name);
+    localStorage.setItem('skys-color', String(myColor));
+  } catch {}
+  nameInput.blur();
   document.getElementById('start').hidden = true;
+  document.getElementById('hud').hidden = false;
   document.documentElement.requestFullscreen().catch(() => {});
   sounds.init();
+  network.send({ type: 'join', name, color: myColor });
   started = true;
-});
+  updateScoreboard();
+}
+
+flyButton.addEventListener('click', startGame);
+nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') startGame(); });
+flyButton.disabled = false;
+statusText.textContent = '';
+nameInput.focus();
 
 // Put the camera in a nice spot before the game starts
 planeMesh.position.copy(player.pos);
@@ -494,6 +784,7 @@ function loop() {
 
   if (started) {
     updatePlayer(dt);
+    sendMyState(dt);
     updateBullets(dt);
     updateBombs(dt);
     updateCamera(dt);
@@ -505,6 +796,7 @@ function loop() {
     messageTimer -= dt;
     if (messageTimer <= 0) message.textContent = '';
   }
+  updateOthers(dt);
   effects.update(dt);
   updateBalloons(time);
   world.update(dt, camera.position);
@@ -515,4 +807,4 @@ function loop() {
 loop();
 
 // For testing: lets a test program look inside the game
-window.skys = { player, keys, camera, balloons, get score() { return score; } };
+window.skys = { player, keys, camera, balloons, others, network, world, get me() { return me; } };

@@ -20,6 +20,7 @@ export function makePlane(color) {
   plane.userData.hideInCockpit = hideInCockpit;
 
   const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.45 });
+  plane.userData.paint = paint;     // so we can change the color later
   const white = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, metalness: 0.2, roughness: 0.5 });
   const blue = new THREE.MeshStandardMaterial({ color: 0x1a3a8a, roughness: 0.5 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb0b8bf, metalness: 0.9, roughness: 0.3 });
@@ -151,4 +152,39 @@ export function makeBomb() {
   }
   bomb.traverse((part) => { part.castShadow = true; });
   return bomb;
+}
+
+// 🏷️ A NAME TAG that floats above another player's plane, with their health bar.
+// You can see it through buildings, so it helps you find them!
+export function makeNameTag() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 80;
+  const g = canvas.getContext('2d');
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture, depthTest: false, sizeAttenuation: false, fog: false,
+  }));
+  tag.scale.set(0.3, 0.094, 1);
+  tag.renderOrder = 10;
+
+  tag.userData.draw = (name, color, health, maxHealth) => {
+    g.clearRect(0, 0, 256, 80);
+    g.font = 'bold 30px -apple-system, Helvetica, Arial, sans-serif';
+    g.textAlign = 'center';
+    g.lineWidth = 6;
+    g.strokeStyle = 'rgba(0,0,0,0.8)';
+    g.strokeText(name, 128, 34);
+    g.fillStyle = '#' + color.toString(16).padStart(6, '0');
+    g.fillText(name, 128, 34);
+    // health bar
+    g.fillStyle = 'rgba(0,0,0,0.6)';
+    g.fillRect(48, 48, 160, 18);
+    const part = Math.max(0, health / maxHealth);
+    g.fillStyle = part > 0.5 ? '#4caf50' : part > 0.2 ? '#ff9800' : '#f44336';
+    g.fillRect(51, 51, 154 * part, 12);
+    texture.needsUpdate = true;
+  };
+  return tag;
 }

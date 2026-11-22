@@ -110,19 +110,20 @@ export class Sounds {
     this.windFilter.frequency.setTargetAtTime(400 + speed * 12, t, 0.2);
   }
 
-  // ---------- SHOOT: a loud "pew!" with a little "tak" ----------
-  shoot() {
-    if (!this.ctx) return;
+  // ---------- SHOOT: a loud "pew!" with a little "tak". loudness: 1 = close, 0 = far ----------
+  shoot(loudness = 1) {
+    if (!this.ctx || loudness <= 0.01) return;
+    const L = loudness;
     const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     osc.type = 'square';
     osc.frequency.setValueAtTime(1500, t);
     osc.frequency.exponentialRampToValueAtTime(200, t + 0.13);
-    osc.connect(this.volume(0.35, 0.001, 0.13, t));
+    osc.connect(this.volume(0.35 * L, 0.001, 0.13, t));
     osc.start(t);
     osc.stop(t + 0.14);
 
-    this.noiseSource(t, 0.06).connect(this.filter('highpass', 2000)).connect(this.volume(0.5, 0.001, 0.06, t));
+    this.noiseSource(t, 0.06).connect(this.filter('highpass', 2000)).connect(this.volume(0.5 * L, 0.001, 0.06, t));
   }
 
   // ---------- BOOST: a rising "whoooOOSH" ----------
@@ -189,6 +190,21 @@ export class Sounds {
     thump.connect(this.volume(2.5 * L, 0.001, 1.4, t));
     thump.start(t);
     thump.stop(t + 1.4);
+  }
+
+  // ---------- HIT: "klang!" when a bullet hits a plane ----------
+  hit(loudness = 1) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    for (const frequency of [520, 1230]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(frequency, t);
+      osc.frequency.exponentialRampToValueAtTime(frequency * 0.6, t + 0.2);
+      osc.connect(this.volume(0.2 * loudness, 0.001, 0.2, t));
+      osc.start(t);
+      osc.stop(t + 0.2);
+    }
   }
 
   // ---------- POP: when you hit a balloon ----------

@@ -5,7 +5,18 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const BLOCK = 60;  // size of one city block, including half of the streets around it
 const TILE = 32;   // a window picture covers 32 x 32 meters of wall (8 x 8 windows)
 
-export function createWorld(scene, renderer, settings) {
+// A "seeded" random number maker. If two computers start with the same seed number,
+// they get the same "random" numbers, so they build exactly the same city!
+let seed = 1;
+export function random() {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+export function createWorld(scene, renderer, settings, citySeed) {
+  seed = citySeed;
   const sharpness = renderer.capabilities.getMaxAnisotropy();
   const citySize = settings.cityBlocks * BLOCK;
 
@@ -73,8 +84,8 @@ function canvasTexture(width, height, draw, sharpness) {
 
 function speckles(g, width, height, count, colors) {
   for (let i = 0; i < count; i++) {
-    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
-    g.fillRect(Math.random() * width, Math.random() * height, 2, 2);
+    g.fillStyle = colors[Math.floor(random() * colors.length)];
+    g.fillRect(random() * width, random() * height, 2, 2);
   }
 }
 
@@ -281,7 +292,7 @@ function paint(geometry, color) {
 }
 
 function pick(list) {
-  return list[Math.floor(Math.random() * list.length)];
+  return list[Math.floor(random() * list.length)];
 }
 
 function makeCity(scene, blocks, sharpness) {
@@ -316,7 +327,7 @@ function makeCity(scene, blocks, sharpness) {
     }
     box.translate(x, height / 2, z);
     // Make each building a tiny bit lighter or darker so they don't all look the same
-    paint(box, new THREE.Color(tint).multiplyScalar(0.8 + Math.random() * 0.2));
+    paint(box, new THREE.Color(tint).multiplyScalar(0.8 + random() * 0.2));
     wallParts[styleName].push(box);
 
     if (flatRoof) {
@@ -324,11 +335,11 @@ function makeCity(scene, blocks, sharpness) {
       roof.translate(x, height, z);
       parts.roof.push(roof);
       // Air conditioners on top of some buildings
-      if (Math.random() < 0.6) {
-        for (let n = 0; n < 1 + Math.floor(Math.random() * 3); n++) {
-          const s = 2 + Math.random() * 3;
+      if (random() < 0.6) {
+        for (let n = 0; n < 1 + Math.floor(random() * 3); n++) {
+          const s = 2 + random() * 3;
           const ac = new THREE.BoxGeometry(s, 1.6, s);
-          ac.translate(x + (Math.random() - 0.5) * (width - s - 1), height + 1.3, z + (Math.random() - 0.5) * (depth - s - 1));
+          ac.translate(x + (random() - 0.5) * (width - s - 1), height + 1.3, z + (random() - 0.5) * (depth - s - 1));
           parts.roof.push(ac);
         }
       }
@@ -337,7 +348,7 @@ function makeCity(scene, blocks, sharpness) {
   }
 
   function addAntenna(x, z, bottom) {
-    const tall = 12 + Math.random() * 18;
+    const tall = 12 + random() * 18;
     const pole = new THREE.CylinderGeometry(0.25, 0.5, tall, 6);
     pole.translate(x, bottom + tall / 2, z);
     parts.antenna.push(pole);
@@ -347,12 +358,12 @@ function makeCity(scene, blocks, sharpness) {
   }
 
   // Trees: pointy pine trees or round leafy trees
-  function addTree(x, z, size = 0.8 + Math.random() * 0.6) {
+  function addTree(x, z, size = 0.8 + random() * 0.6) {
     const trunk = new THREE.CylinderGeometry(0.4 * size, 0.6 * size, 3 * size, 6);
     trunk.translate(x, 1.5 * size, z);
     parts.trunk.push(trunk);
     let leaves;
-    if (Math.random() < 0.5) {
+    if (random() < 0.5) {
       leaves = new THREE.ConeGeometry(3 * size, 7 * size, 7);
       leaves.translate(x, 6.5 * size, z);
     } else {
@@ -382,20 +393,20 @@ function makeCity(scene, blocks, sharpness) {
     }
     const trees = Math.round(size * size / 200);
     for (let n = 0; n < trees * 3 && n < 400; n++) {
-      const dx = (Math.random() - 0.5) * (size - 6), dz = (Math.random() - 0.5) * (size - 6);
+      const dx = (random() - 0.5) * (size - 6), dz = (random() - 0.5) * (size - 6);
       const fromMiddle = Math.hypot(dx, dz);
       const onPath = Math.abs(dx) < 3 || Math.abs(dz) < 3 || Math.abs(fromMiddle - size * 0.33) < 4;
-      if (fromMiddle > size * 0.4 && !onPath && Math.random() < 0.4) addTree(cx + dx, cz + dz);
+      if (fromMiddle > size * 0.4 && !onPath && random() < 0.4) addTree(cx + dx, cz + dz);
     }
   }
 
   // A HOUSE with a pointy roof
   function addHouse(x, z) {
-    const w = 9 + Math.random() * 4, d = 8 + Math.random() * 3;
-    const h = Math.random() < 0.5 ? 4 : 7.5;          // one or two floors
-    const turned = Math.random() < 0.5;
+    const w = 9 + random() * 4, d = 8 + random() * 3;
+    const h = random() < 0.5 ? 4 : 7.5;          // one or two floors
+    const turned = random() < 0.5;
     addBuilding(x, z, turned ? d : w, turned ? w : d, h, 'house', { tint: pick(HOUSE_COLORS), flatRoof: false });
-    const roofHeight = 2.5 + Math.random() * 1.5;
+    const roofHeight = 2.5 + random() * 1.5;
     const roof = pointyRoof(w + 1, d + 1, roofHeight);
     if (turned) roof.rotateY(Math.PI / 2);
     roof.translate(x, h, z);
@@ -409,21 +420,21 @@ function makeCity(scene, blocks, sharpness) {
     flatGround(parts.yard, cx, cz, 46, 46, 0.3);
     for (const dx of [-11, 11]) {
       for (const dz of [-11, 11]) {
-        if (Math.random() < 0.9) addHouse(cx + dx + (Math.random() - 0.5) * 3, cz + dz + (Math.random() - 0.5) * 3);
+        if (random() < 0.9) addHouse(cx + dx + (random() - 0.5) * 3, cz + dz + (random() - 0.5) * 3);
       }
     }
     for (const [dx, dz] of [[-20, -20], [20, -20], [-20, 20], [20, 20], [0, 0]]) {
-      if (Math.random() < 0.5) addTree(cx + dx, cz + dz, 0.7 + Math.random() * 0.4);
+      if (random() < 0.5) addTree(cx + dx, cz + dz, 0.7 + random() * 0.4);
     }
   }
 
   // A FACTORY with tall chimneys
   function addFactory(cx, cz) {
-    const h = 12 + Math.random() * 5;
+    const h = 12 + random() * 5;
     addBuilding(cx - 4, cz, 34, 40, h, 'factory');
     addBuilding(cx + 16, cz - 12, 12, 16, 18, 'office');
     for (const dx of [-14, -4]) {
-      const tall = 40 + Math.random() * 15;
+      const tall = 40 + random() * 15;
       const chimney = new THREE.CylinderGeometry(1.8, 2.4, tall, 12);
       chimney.translate(cx + dx, tall / 2, cz + 10);
       parts.chimney.push(chimney);
@@ -437,7 +448,7 @@ function makeCity(scene, blocks, sharpness) {
 
   // A SPORTS FIELD with stands for the fans and big lights
   function addSportsField(cx, cz) {
-    const turned = Math.random() < 0.5;
+    const turned = random() < 0.5;
     const field = new THREE.PlaneGeometry(44, 28);
     field.rotateX(-Math.PI / 2);
     if (turned) field.rotateY(Math.PI / 2);
@@ -465,7 +476,7 @@ function makeCity(scene, blocks, sharpness) {
 
   // A ROUND glass TOWER
   function addRoundTower(cx, cz, height) {
-    const r = 13 + Math.random() * 5;
+    const r = 13 + random() * 5;
     const style = pick(['glass', 'teal', 'white']);
     const tower = new THREE.CylinderGeometry(r, r, height, 32, 1);
     const uv = tower.attributes.uv;
@@ -474,24 +485,24 @@ function makeCity(scene, blocks, sharpness) {
       else uv.setXY(i, 0.01, 0.01);
     }
     tower.translate(cx, height / 2, cz);
-    paint(tower, new THREE.Color(0.8 + Math.random() * 0.2, 0.8 + Math.random() * 0.2, 0.9));
+    paint(tower, new THREE.Color(0.8 + random() * 0.2, 0.8 + random() * 0.2, 0.9));
     wallParts[style].push(tower);
     const roof = new THREE.CylinderGeometry(r + 0.5, r + 0.5, 1, 32);
     roof.translate(cx, height, cz);
     parts.roof.push(roof);
-    if (Math.random() < 0.7) addAntenna(cx, cz, height + 0.5);
+    if (random() < 0.7) addAntenna(cx, cz, height + 0.5);
     collide(cx, cz, r * 1.7, r * 1.7, height + 0.5);
   }
 
   function addSkyscraper(cx, cz, middle) {
-    const h = 90 + Math.random() * 140 * middle;
+    const h = 90 + random() * 140 * middle;
     const style = pick(['glass', 'glass', 'teal', 'white', 'office']);
     addBuilding(cx, cz, 38, 38, h, style);
     if (h > 150) {
-      const top = h + 15 + Math.random() * 30;   // a thinner tower on top
+      const top = h + 15 + random() * 30;   // a thinner tower on top
       addBuilding(cx, cz, 22, 22, top, style);
       addAntenna(cx, cz, top + 0.5);
-    } else if (Math.random() < 0.5) {
+    } else if (random() < 0.5) {
       addAntenna(cx, cz, h + 0.5);
     }
   }
@@ -499,17 +510,17 @@ function makeCity(scene, blocks, sharpness) {
   function addSmallBuildings(cx, cz, low) {
     for (const dx of [-10, 10]) {
       for (const dz of [-10, 10]) {
-        if (low) addBuilding(cx + dx, cz + dz, 16, 16, 7 + Math.random() * 7, 'white', { tint: pick(HOUSE_COLORS) });
-        else addBuilding(cx + dx, cz + dz, 16, 16, 12 + Math.random() * 45, pick(['brick', 'office', 'white', 'brick']));
+        if (low) addBuilding(cx + dx, cz + dz, 16, 16, 7 + random() * 7, 'white', { tint: pick(HOUSE_COLORS) });
+        else addBuilding(cx + dx, cz + dz, 16, 16, 12 + random() * 45, pick(['brick', 'office', 'white', 'brick']));
       }
     }
   }
 
   function addLongBuildings(cx, cz) {
-    const long = Math.random() < 0.5;
+    const long = random() < 0.5;
     for (const d of [-10, 10]) {
       addBuilding(cx + (long ? 0 : d), cz + (long ? d : 0), long ? 38 : 16, long ? 16 : 38,
-                  15 + Math.random() * 50, pick(['office', 'white', 'brick', 'teal']));
+                  15 + random() * 50, pick(['office', 'white', 'brick', 'teal']));
     }
   }
 
@@ -524,22 +535,22 @@ function makeCity(scene, blocks, sharpness) {
 
       // 0 = middle of the city, 1 = edge of the city
       const distance = Math.max(Math.abs(cx), Math.abs(cz)) / (citySize / 2);
-      const r = Math.random();
+      const r = random();
 
       if (distance < 0.4) {                          // DOWNTOWN: tall towers
-        if (r < 0.08) addPark(cx, cz, 46, Math.random() < 0.5);
+        if (r < 0.08) addPark(cx, cz, 46, random() < 0.5);
         else if (r < 0.6) addSkyscraper(cx, cz, 1.2 - distance);
-        else if (r < 0.72) addRoundTower(cx, cz, 90 + Math.random() * 90);
+        else if (r < 0.72) addRoundTower(cx, cz, 90 + random() * 90);
         else addLongBuildings(cx, cz);
       } else if (distance < 0.72) {                  // THE MIDDLE: offices, apartments, shops
-        if (r < 0.12) addPark(cx, cz, 46, Math.random() < 0.5);
+        if (r < 0.12) addPark(cx, cz, 46, random() < 0.5);
         else if (r < 0.17) addSportsField(cx, cz);
-        else if (r < 0.22) addRoundTower(cx, cz, 50 + Math.random() * 50);
+        else if (r < 0.22) addRoundTower(cx, cz, 50 + random() * 50);
         else if (r < 0.34) addSmallBuildings(cx, cz, true);
         else if (r < 0.67) addSmallBuildings(cx, cz, false);
         else addLongBuildings(cx, cz);
       } else {                                       // THE SUBURBS: houses and factories
-        if (r < 0.12) addPark(cx, cz, 46, Math.random() < 0.5);
+        if (r < 0.12) addPark(cx, cz, 46, random() < 0.5);
         else if (r < 0.2) addFactory(cx, cz);
         else if (r < 0.25) addSportsField(cx, cz);
         else addSuburb(cx, cz);
@@ -590,10 +601,10 @@ function makeMountains(scene) {
   const forest = new THREE.Color('#4a6b3c'), rock = new THREE.Color('#857a6c'), snow = new THREE.Color('#f5f7fa');
   const count = 54;
   for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.08;
-    const distance = 2100 + Math.random() * 900;
-    const radius = 250 + Math.random() * 350;
-    const height = 180 + Math.random() * 500;
+    const angle = (i / count) * Math.PI * 2 + random() * 0.08;
+    const distance = 2100 + random() * 900;
+    const radius = 250 + random() * 350;
+    const height = 180 + random() * 500;
     const cone = new THREE.ConeGeometry(radius, height, 10, 6, true);
     const p = cone.attributes.position;
     const colors = [];
@@ -629,14 +640,14 @@ function makeClouds(scene) {
   const clouds = [];
   for (let i = 0; i < 30; i++) {
     const puffs = [];
-    for (let n = 0; n < 4 + Math.floor(Math.random() * 4); n++) {
-      const puff = new THREE.SphereGeometry(14 + Math.random() * 14, 10, 8);
+    for (let n = 0; n < 4 + Math.floor(random() * 4); n++) {
+      const puff = new THREE.SphereGeometry(14 + random() * 14, 10, 8);
       puff.scale(1, 0.6, 1);
-      puff.translate((Math.random() - 0.5) * 80, Math.random() * 10, (Math.random() - 0.5) * 40);
+      puff.translate((random() - 0.5) * 80, random() * 10, (random() - 0.5) * 40);
       puffs.push(puff);
     }
     const cloud = new THREE.Mesh(mergeGeometries(puffs), material);
-    cloud.position.set((Math.random() - 0.5) * 3600, 280 + Math.random() * 110, (Math.random() - 0.5) * 3600);
+    cloud.position.set((random() - 0.5) * 3600, 280 + random() * 110, (random() - 0.5) * 3600);
     scene.add(cloud);
     clouds.push(cloud);
   }

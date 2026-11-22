@@ -39,6 +39,24 @@ To stop the game server, go back to the Terminal and press **Ctrl + C**.
 💡 **Tip:** at the top of `public/game.js` there is a `SETTINGS` list.
 Try changing the numbers (like `boostSpeed` or `planeColor`), save, and reload the page!
 
-## Coming next
+## 👨‍👦 Playing together (multiplayer)
 
-- 👨‍👦 Multiplayer: play with Dad on the home network!
+1. On **one** computer (the "host"), start the server with `npm start`.
+   It prints two addresses, like this:
+   ```
+   On this computer, open:   http://localhost:3000
+   On another computer:      http://192.168.1.110:3000
+   ```
+2. On the host computer, open **http://localhost:3000** in Chrome.
+3. On the other computer (on the same Wi‑Fi), open the **"On another computer"** address in Chrome.
+4. Each player types their name, picks a color, and clicks **Fly!**
+
+- 🎈 Popping a balloon = **1 point** (the balloons are shared, so race for them!)
+- ✈️💥 Shooting down the other plane = **5 points**
+- Each plane can take **10 bullet hits**. A bomb exploding close by does big damage!
+
+**If the other computer can't connect:** the first time, your Mac may ask
+"Do you want the application node to accept incoming network connections?". Click **Allow**.
+
+If the server is stopped and started again, everybody needs to reload the page
+(the city is different every time the server starts).
